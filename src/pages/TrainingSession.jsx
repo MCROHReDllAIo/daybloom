@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2 } from 'lucide-react'
+import { Link, useParams, useNavigate } from 'react-router-dom'
+import { ArrowLeft, CheckCircle2, CalendarDays } from 'lucide-react'
 import { useApp } from '../context/AppContext'
 import { trainingCategories } from '../data/training'
 import { XP_REWARDS } from '../data/badges'
@@ -18,6 +18,7 @@ export default function TrainingSession() {
     completeTraining,
     awardXp,
   } = useApp()
+  const navigate = useNavigate()
 
   const category = trainingCategories.find((c) => c.id === categoryId)
   const [level, setLevel] = useState('beginner')
@@ -92,6 +93,8 @@ export default function TrainingSession() {
   const markComplete = () => {
     completeTraining(categoryId, level)
   }
+
+  const goToPlan = () => navigate('/plan')
 
   return (
     <div>
@@ -287,14 +290,13 @@ export default function TrainingSession() {
             >
               {t.training.next}
             </button>
+          ) : isCompleted ? (
+            <button type="button" className="btn btn-primary" onClick={goToPlan}>
+              <CalendarDays size={16} /> {t.nav.plan}
+            </button>
           ) : (
-            <button
-              type="button"
-              className="btn btn-sage"
-              onClick={markComplete}
-              disabled={isCompleted}
-            >
-              {isCompleted ? t.training.completed : t.training.complete}
+            <button type="button" className="btn btn-sage" onClick={markComplete}>
+              {t.training.complete}
             </button>
           )}
         </div>

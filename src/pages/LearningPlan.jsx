@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useApp } from '../context/AppContext'
 import { trainingCategories } from '../data/training'
 import { formatTime12, todayISO } from '../utils/timetable'
@@ -8,6 +9,7 @@ import {
   Sparkles,
   CheckCircle2,
   RefreshCw,
+  PlayCircle,
 } from 'lucide-react'
 
 export default function LearningPlan() {
@@ -153,18 +155,28 @@ export default function LearningPlan() {
                   </span>
                 </p>
               )}
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!!rec.noFit}
-                onClick={() => addRecommendationToTimetable(rec)}
-              >
-                <CalendarPlus size={16} /> {t.plan.addToTimetable}
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  disabled={!!rec.noFit}
+                  onClick={() => addRecommendationToTimetable(rec)}
+                >
+                  <CalendarPlus size={16} /> {t.plan.addToTimetable}
+                </button>
+                <Link to={`/training/${rec.categoryId}`} className="btn btn-outline">
+                  <PlayCircle size={16} /> {t.training.start}
+                </Link>
+              </div>
             </article>
           ))}
           {!recs.length && (
-            <div className="card empty-state">{t.plan.noFree}</div>
+            <div className="card empty-state">
+              <p>{t.plan.noFree}</p>
+              <Link to="/timetable" className="btn btn-primary">
+                {t.home.card1Btn}
+              </Link>
+            </div>
           )}
         </div>
       </section>

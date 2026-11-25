@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react'
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react'
 import { translations } from '../i18n/translations'
 import { XP_REWARDS } from '../data/badges'
 import {
@@ -6,16 +6,17 @@ import {
   hasOverlap,
   todayISO,
   durationHours,
+  placeActivity,
+  startOfWeekISO,
 } from '../utils/timetable'
 import {
   getRecommendations,
   recommendationToActivity,
   canAddRecommendation,
-  applyTrainingToSchedule,
 } from '../utils/recommendations'
 
 const AppContext = createContext(null)
-const STORAGE_KEY = 'daybloom_data_v1'
+const STORAGE_KEY = 'daybloom_data_v2'
 
 const defaultGoals = () => [
   { id: 'g1', key: 'study', completed: false },
@@ -28,12 +29,13 @@ const defaultGoals = () => [
 const emptyUserData = () => ({
   activities: [],
   preferredSkills: [],
-  trainingProgress: {}, // { [categoryId]: { beginner: {done, quizScore, activityDone}, ... } }
+  trainingProgress: {},
   completedTrainings: [],
   badges: [],
   xp: 0,
   dailyGoals: defaultGoals(),
   weeklyTarget: 5,
+  awardedActivityIds: [],
   profile: {
     name: '',
     email: '',
@@ -46,10 +48,15 @@ const emptyUserData = () => ({
 function loadStore() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (!raw) {
-      return { users: {}, currentUserId: null, lang: 'en' }
+    if (raw) return JSON.parse(raw)
+    // migrate from v1 if present
+    const v1 = localStorage.getItem('daybloom_data_v1')
+    if (v1) {
+      const parsed = JSON.parse(v1)
+      localStorage.setItem(STORAGE_KEY, v1)
+      return parsed
     }
-    return JSON.parse(raw)
+    return { users: {}, currentUserId: null, lang: 'en' }
   } catch {
     return { users: {}, currentUserId: null, lang: 'en' }
   }
@@ -62,6 +69,7 @@ function saveStore(store) {
 export function AppProvider({ children }) {
   const [store, setStore] = useState(loadStore)
   const [toast, setToast] = useState(null)
+  const toastTimer = useRef(null)
 
   const lang = store.lang || 'en'
   const t = translations[lang] || translations.en
@@ -80,8 +88,9 @@ export function AppProvider({ children }) {
   }, [store])
 
   const showToast = useCallback((message, type = 'success') => {
-    setToast({ message, type })
-    setTimeout(() => setToast(null), 2800)
+    setToast({ message, type, id: Date.now() })
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    toastTimer.current = setTimeout(() => setToast(null), 3000)
   }, [])
 
   const setLang = (next) => {
@@ -133,6 +142,7 @@ export function AppProvider({ children }) {
       users: { ...s.users, [id]: data },
       currentUserId: id,
     }))
+    showToast(lang === 'ar' ? 'مرحباً بك في DAYBLOOM!' : 'Welcome to DAYBLOOM!')
     return { ok: true }
   }
 
@@ -147,9 +157,11 @@ export function AppProvider({ children }) {
   const continueAsGuest = () => {
     const id = 'guest@daybloom.app'
     setStore((s) => {
-      if (s.users[id]) {
+      const existing = s.users[id]
+      if (existing?.activities?.length) {
         return { ...s, currentUserId: id }
       }
+      const seeded = generateSmartTimetable([], startOfWeekISO(todayISO()))
       return {
         ...s,
         currentUserId: id,
@@ -157,20 +169,30 @@ export function AppProvider({ children }) {
           ...s.users,
           [id]: {
             ...emptyUserData(),
+            ...(existing || {}),
             id,
             password: 'guest',
+            activities: seeded,
+            badges: existing?.badges?.length ? existing.badges : ['time_master'],
+            xp: existing?.xp || 25,
+            preferredSkills: existing?.preferredSkills?.length
+              ? existing.preferredSkills
+              : ['office', 'ai', 'design'],
             profile: {
               name: lang === 'ar' ? 'طالب تجريبي' : 'Demo Student',
               email: id,
               major: lang === 'ar' ? 'علوم الحاسوب' : 'Computer Science',
-              goals: lang === 'ar' ? 'تحسين إدارة الوقت والمهارات الرقمية' : 'Improve time management and digital skills',
+              goals:
+                lang === 'ar'
+                  ? 'تحسين إدارة الوقت والمهارات الرقمية'
+                  : 'Improve time management and digital skills',
               photo: 'https://api.dicebear.com/7.x/avataaars/svg?seed=DaybloomDemo',
             },
-            preferredSkills: ['office', 'ai', 'design'],
           },
         },
       }
     })
+    showToast(lang === 'ar' ? 'تم تحميل الحساب التجريبي مع جدول جاهز' : 'Demo account loaded with a ready timetable')
   }
 
   const logout = () => {
@@ -183,26 +205,33 @@ export function AppProvider({ children }) {
       showToast(t.timetable.overlap, 'error')
       return { ok: false }
     }
-    updateUser((u) => ({ ...u, activities: [...u.activities, activity] }))
+    updateUser((u) => ({
+      ...u,
+      activities: placeActivity(u.activities, activity),
+    }))
+    showToast(lang === 'ar' ? 'تمت إضافة النشاط' : 'Activity added')
     return { ok: true }
   }
 
   const updateActivity = (id, patch) => {
     if (!user) return { ok: false }
-    const candidate = { ...user.activities.find((a) => a.id === id), ...patch }
+    const current = user.activities.find((a) => a.id === id)
+    if (!current) return { ok: false }
+    const candidate = { ...current, ...patch }
     if (hasOverlap(user.activities, candidate, id)) {
       showToast(t.timetable.overlap, 'error')
       return { ok: false }
     }
-    updateUser((u) => ({
-      ...u,
-      activities: u.activities.map((a) => (a.id === id ? { ...a, ...patch } : a)),
-    }))
+    updateUser((u) => {
+      const without = u.activities.filter((a) => a.id !== id)
+      return { ...u, activities: placeActivity(without, { ...candidate, generated: false }) }
+    })
     return { ok: true }
   }
 
   const deleteActivity = (id) => {
     updateUser((u) => ({ ...u, activities: u.activities.filter((a) => a.id !== id) }))
+    showToast(lang === 'ar' ? 'تم حذف النشاط' : 'Activity deleted')
   }
 
   const toggleActivityComplete = (id) => {
@@ -210,11 +239,16 @@ export function AppProvider({ children }) {
       const act = u.activities.find((a) => a.id === id)
       if (!act) return u
       const completed = !act.completed
-      let xp = u.xp
-      if (completed) xp += XP_REWARDS.completeActivity
+      const awarded = new Set(u.awardedActivityIds || [])
+      let xp = u.xp || 0
+      if (completed && !awarded.has(id)) {
+        xp += XP_REWARDS.completeActivity
+        awarded.add(id)
+      }
       return {
         ...u,
         xp,
+        awardedActivityIds: [...awarded],
         activities: u.activities.map((a) => (a.id === id ? { ...a, completed } : a)),
       }
     })
@@ -222,8 +256,7 @@ export function AppProvider({ children }) {
 
   const generateTimetable = () => {
     if (!user) return
-    const weekStart = todayISO()
-    // Keep user-entered non-generated activities; regenerate generated ones
+    const weekStart = startOfWeekISO(todayISO())
     const keep = user.activities.filter((a) => !a.generated)
     const next = generateSmartTimetable(keep, weekStart)
     updateUser((u) => {
@@ -231,7 +264,7 @@ export function AppProvider({ children }) {
       return {
         ...u,
         activities: next,
-        xp: u.xp + XP_REWARDS.generateTimetable,
+        xp: (u.xp || 0) + XP_REWARDS.generateTimetable,
         badges,
       }
     })
@@ -251,8 +284,8 @@ export function AppProvider({ children }) {
     const activity = recommendationToActivity(rec, lang)
     updateUser((u) => ({
       ...u,
-      activities: applyTrainingToSchedule(u.activities, activity),
-      xp: u.xp + XP_REWARDS.addTrainingToPlan,
+      activities: placeActivity(u.activities, activity),
+      xp: (u.xp || 0) + XP_REWARDS.addTrainingToPlan,
     }))
     showToast(t.plan.added)
     return { ok: true }
@@ -275,34 +308,47 @@ export function AppProvider({ children }) {
   }
 
   const completeTraining = (categoryId, level) => {
+    let awarded = false
     updateUser((u) => {
       const key = `${categoryId}:${level}`
-      const already = u.completedTrainings.includes(key)
-      if (already) return u
+      if (u.completedTrainings.includes(key)) return u
+      awarded = true
 
       const completedTrainings = [...u.completedTrainings, key]
       let badges = [...u.badges]
-      let xp = u.xp + XP_REWARDS.completeTraining
+      let xp = (u.xp || 0) + XP_REWARDS.completeTraining
 
       if (!badges.includes('digital_beginner')) badges.push('digital_beginner')
       if (categoryId === 'office' && !badges.includes('excel_explorer')) badges.push('excel_explorer')
       if (categoryId === 'design' && !badges.includes('creative_designer')) badges.push('creative_designer')
       if (categoryId === 'ai' && !badges.includes('ai_explorer')) badges.push('ai_explorer')
 
-      // Weekly goal: if training hours this week >= target
       const trainingActs = u.activities.filter((a) => a.category === 'training' && a.completed)
-      const hours = durationHours(trainingActs) + (u.trainingProgress[categoryId]?.[level]?.duration || 0.5) / 60
+      const hours = durationHours(trainingActs) + 0.5
       if (hours >= (u.weeklyTarget || 5) && !badges.includes('learning_champion')) {
         badges.push('learning_champion')
         xp += XP_REWARDS.weeklyGoal
       }
 
+      // Also mark matching timetable training as completed
+      const activities = u.activities.map((a) =>
+        a.trainingId === categoryId && a.trainingLevel === level
+          ? { ...a, completed: true }
+          : a,
+      )
+
       const prev = u.trainingProgress[categoryId] || {}
+      const goals = u.dailyGoals.map((g) =>
+        g.key === 'training' || g.key === 'learn' ? { ...g, completed: true } : g,
+      )
+
       return {
         ...u,
         completedTrainings,
         badges,
         xp,
+        activities,
+        dailyGoals: goals,
         trainingProgress: {
           ...u.trainingProgress,
           [categoryId]: {
@@ -312,7 +358,7 @@ export function AppProvider({ children }) {
         },
       }
     })
-    showToast(t.training.completed)
+    if (awarded) showToast(t.training.completed)
   }
 
   const toggleGoal = (goalId) => {
@@ -320,11 +366,12 @@ export function AppProvider({ children }) {
       const goals = u.dailyGoals.map((g) =>
         g.id === goalId ? { ...g, completed: !g.completed } : g,
       )
-      const justCompleted = goals.find((g) => g.id === goalId)?.completed
+      const target = goals.find((g) => g.id === goalId)
+      const justCompleted = target?.completed
       return {
         ...u,
         dailyGoals: goals,
-        xp: justCompleted ? u.xp + 5 : u.xp,
+        xp: justCompleted ? (u.xp || 0) + 5 : u.xp,
       }
     })
   }
@@ -336,7 +383,7 @@ export function AppProvider({ children }) {
 
   const recommendations = useMemo(() => {
     if (!user) return { recommendations: [], gaps: [] }
-    return getRecommendations(user.activities, user.preferredSkills)
+    return getRecommendations(user.activities, user.preferredSkills, todayISO())
   }, [user])
 
   const stats = useMemo(() => {
@@ -351,18 +398,22 @@ export function AppProvider({ children }) {
         timetablePct: 0,
         trainingPct: 0,
         xp: 0,
+        freeMinutes: 0,
       }
     }
     const acts = user.activities
     const studyHours = durationHours(acts.filter((a) => a.category === 'studying'))
     const trainingHours = durationHours(acts.filter((a) => a.category === 'training'))
+    const freeMinutes = Math.round(
+      durationHours(acts.filter((a) => a.category === 'free')) * 60,
+    )
     const completable = acts.filter((a) => a.category !== 'free' && a.category !== 'sleep')
     const completedTasks = completable.filter((a) => a.completed).length
     const totalTasks = completable.length
     const completedCourses = user.completedTrainings.length
     const skillsDeveloped = new Set(user.completedTrainings.map((k) => k.split(':')[0])).size
     const timetablePct = totalTasks ? Math.round((completedTasks / totalTasks) * 100) : 0
-    const trainingPct = Math.min(100, Math.round((completedCourses / 24) * 100)) // 8 cats × 3 levels
+    const trainingPct = Math.min(100, Math.round((completedCourses / 24) * 100))
     return {
       studyHours: Math.round(studyHours * 10) / 10,
       completedTasks,
@@ -373,6 +424,7 @@ export function AppProvider({ children }) {
       timetablePct,
       trainingPct,
       xp: user.xp || 0,
+      freeMinutes,
     }
   }, [user])
 

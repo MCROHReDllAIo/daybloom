@@ -100,6 +100,20 @@ export default function Navbar() {
               {l.label}
             </NavLink>
           ))}
+          {isLoggedIn ? (
+            <button type="button" className="btn btn-outline" onClick={onLogout}>
+              {t.nav.logout} · {user?.xp || 0} XP
+            </button>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, padding: '0.5rem 0.85rem' }}>
+              <Link to="/login" className="btn btn-outline btn-sm" onClick={() => setOpen(false)}>
+                {t.nav.login}
+              </Link>
+              <Link to="/signup" className="btn btn-primary btn-sm" onClick={() => setOpen(false)}>
+                {t.nav.signup}
+              </Link>
+            </div>
+          )}
         </div>
       )}
     </header>

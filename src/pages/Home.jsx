@@ -13,20 +13,21 @@ import { CATEGORY_COLORS, trainingCategories } from '../data/training'
 import { formatTime12, todayISO } from '../utils/timetable'
 
 export default function Home() {
-  const { t, lang, user, isLoggedIn, stats, recommendations } = useApp()
+  const { t, lang, user, isLoggedIn, stats, recommendations, continueAsGuest } = useApp()
   const today = todayISO()
   const todayActs = (user?.activities || [])
     .filter((a) => a.date === today)
     .sort((a, b) => a.start.localeCompare(b.start))
     .slice(0, 4)
 
-  const recs = recommendations.recommendations.slice(0, 3)
+  const recs = recommendations.recommendations.filter((r) => !r.noFit).slice(0, 3)
   const motiv = t.motiv[new Date().getDay() % t.motiv.length]
 
   return (
     <div>
       <section className="hero">
         <div>
+          <p className="hero-kicker">{t.sloganSecondary}</p>
           <h1>{t.home.welcome}</h1>
           <p className="lead">{t.home.subtitle}</p>
           <p className="slogan">{t.slogan}</p>
@@ -37,6 +38,11 @@ export default function Home() {
             <Link to={isLoggedIn ? '/training' : '/signup'} className="btn btn-cream">
               {t.home.card2Btn}
             </Link>
+            {!isLoggedIn && (
+              <button type="button" className="btn btn-sage" onClick={continueAsGuest}>
+                {t.auth.guest}
+              </button>
+            )}
           </div>
         </div>
         <div className="hero-art">

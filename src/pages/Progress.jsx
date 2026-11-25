@@ -60,6 +60,18 @@ export default function Progress() {
         </div>
       </div>
 
+      <div className="card section-block" style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontWeight: 700 }}>{lang === 'ar' ? 'وقت الفراغ المكتشف' : 'Detected free time'}</div>
+          <div style={{ color: 'var(--text-soft)', fontSize: '0.9rem' }}>
+            {lang === 'ar' ? 'استخدمه للتدريب الرقمي' : 'Use it for digital skills training'}
+          </div>
+        </div>
+        <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>
+          {stats.freeMinutes || 0} <span style={{ fontSize: '0.9rem', fontWeight: 600 }}>{t.training.min}</span>
+        </div>
+      </div>
+
       <div className="grid-2 section-block">
         <section className="card">
           <h2 className="section-title">{t.progress.timetablePct}</h2>

@@ -6,25 +6,33 @@ import {
   minutesToTime,
   timeToMinutes,
   todayISO,
+  startOfWeekISO,
 } from './timetable'
 
 /**
  * Recommend training sessions that fit free gaps, prioritizing preferred skills.
+ * Skips gaps that already have training booked.
  */
 export function getRecommendations(activities, preferredSkills = [], weekStart = todayISO()) {
-  const gaps = findFreePeriodsWeek(activities, weekStart)
+  const from = startOfWeekISO(weekStart)
+  const gaps = findFreePeriodsWeek(activities, from)
     .filter((g) => g.duration >= 15)
-    .sort((a, b) => b.duration - a.duration)
+    .sort((a, b) => {
+      // sooner dates first, then longer gaps
+      if (a.date !== b.date) return a.date.localeCompare(b.date)
+      return b.duration - a.duration
+    })
 
   const preferred = preferredSkills.length
     ? [
         ...trainingCategories.filter((c) => preferredSkills.includes(c.id)),
         ...trainingCategories.filter((c) => !preferredSkills.includes(c.id)),
       ]
-    : trainingCategories
+    : [...trainingCategories]
 
   const recommendations = []
   const usedGaps = new Set()
+  const usedCategories = new Set()
 
   for (const gap of gaps) {
     if (recommendations.length >= 8) break
@@ -34,37 +42,58 @@ export function getRecommendations(activities, preferredSkills = [], weekStart =
     const gapKey = `${gap.date}_${gap.start}`
     if (usedGaps.has(gapKey)) continue
 
-    // Match training whose level duration fits
+    // Skip if training already occupies this gap window
+    const alreadyBooked = activities.some(
+      (a) =>
+        a.category === 'training' &&
+        a.date === gap.date &&
+        timeToMinutes(a.start) < timeToMinutes(gap.end) &&
+        timeToMinutes(a.end) > timeToMinutes(gap.start),
+    )
+    if (alreadyBooked) continue
+
     for (const cat of preferred) {
-      const levels = Object.keys(cat.levels)
+      // Prefer variety unless skill is explicitly preferred
+      if (
+        usedCategories.has(cat.id) &&
+        !preferredSkills.includes(cat.id) &&
+        recommendations.length < preferredSkills.length + 2
+      ) {
+        continue
+      }
+
       let level = 'beginner'
       if (pick.duration >= 50 && cat.levels.advanced) level = 'advanced'
       else if (pick.duration >= 25 && cat.levels.intermediate) level = 'intermediate'
 
-      const levelData = cat.levels[level]
-      const needed = levelData.duration || pick.duration
-      if (needed > gap.duration) {
-        // try shorter
+      let finalDuration = Math.min(
+        gap.duration,
+        cat.levels[level]?.duration || pick.duration,
+      )
+      if (finalDuration > gap.duration) {
         if (gap.duration >= 15 && cat.levels.beginner) {
           level = 'beginner'
+          finalDuration = Math.min(gap.duration, cat.levels.beginner.duration || 15)
         } else continue
       }
 
-      const finalDuration = Math.min(
-        gap.duration,
-        cat.levels[level].duration || pick.duration,
-      )
+      // Snap to 15/30/60 style suggestions based on gap
+      if (gap.duration >= 60) finalDuration = Math.min(finalDuration, 60)
+      else if (gap.duration >= 30) finalDuration = Math.min(finalDuration, 30)
+      else finalDuration = Math.min(finalDuration, 15)
+
       const endMins = timeToMinutes(gap.start) + finalDuration
+      if (endMins > timeToMinutes(gap.end)) continue
       const end = minutesToTime(endMins)
 
-      // Ensure we don't overflow the gap
-      if (endMins > timeToMinutes(gap.end)) continue
+      const type =
+        finalDuration >= 55 ? 'project' : finalDuration >= 25 ? 'exercise' : 'lesson'
 
       recommendations.push({
         id: `rec_${cat.id}_${level}_${gap.date}_${gap.start}`,
         categoryId: cat.id,
         level,
-        type: pick.type,
+        type,
         date: gap.date,
         start: gap.start,
         end,
@@ -74,11 +103,11 @@ export function getRecommendations(activities, preferredSkills = [], weekStart =
         color: cat.color,
       })
       usedGaps.add(gapKey)
+      usedCategories.add(cat.id)
       break
     }
   }
 
-  // If no gaps fit preferred, suggest shorter lessons on other days
   if (!recommendations.length && preferred.length) {
     const cat = preferred[0]
     recommendations.push({
@@ -123,23 +152,5 @@ export function recommendationToActivity(rec, lang = 'en') {
 export function canAddRecommendation(activities, rec) {
   if (!rec.date || !rec.start || !rec.end || rec.noFit) return false
   const candidate = { date: rec.date, start: rec.start, end: rec.end }
-  // Allow replacing free slots — check overlap only with non-free
-  const blocking = activities.filter((a) => a.category !== 'free')
-  return !hasOverlap(blocking, candidate)
-}
-
-/** When adding training, remove/trim overlapping free slots */
-export function applyTrainingToSchedule(activities, trainingActivity) {
-  const withoutOverlappingFree = activities.filter((a) => {
-    if (a.category !== 'free') return true
-    const sameDay = a.date === trainingActivity.date
-    if (!sameDay) return true
-    const aStart = timeToMinutes(a.start)
-    const aEnd = timeToMinutes(a.end)
-    const tStart = timeToMinutes(trainingActivity.start)
-    const tEnd = timeToMinutes(trainingActivity.end)
-    // Remove free slot if it fully contains or overlaps the training
-    return !(aStart < tEnd && tStart < aEnd)
-  })
-  return [...withoutOverlappingFree, trainingActivity]
+  return !hasOverlap(activities, candidate)
 }

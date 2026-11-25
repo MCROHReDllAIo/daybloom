@@ -67,7 +67,59 @@ img {
   flex: 1;
   width: min(1180px, calc(100% - 2rem));
   margin: 0 auto;
-  padding: 1.5rem 0 3rem;
+  padding: 1.5rem 0 2rem;
+}
+
+.site-footer {
+  margin-top: auto;
+  border-top: 1px solid rgba(220, 204, 243, 0.5);
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(10px);
+}
+
+.footer-inner {
+  width: min(1180px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.5rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  text-align: center;
+}
+
+.footer-slogan {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.88rem;
+  max-width: 36rem;
+}
+
+.footer-copy {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-soft);
+  opacity: 0.8;
+}
+
+.date-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.day-col-active {
+  box-shadow: 0 0 0 2px var(--lavender);
+}
+
+.day-col-today h4 {
+  color: #6b4f9a;
+}
+
+[dir='rtl'] .hero-actions .btn svg,
+[dir='rtl'] .feature-card .btn svg {
+  transform: scaleX(-1);
 }
 
 /* Navbar */
@@ -311,6 +363,16 @@ img {
   align-items: center;
   min-height: 340px;
   animation: fadeUp 0.6s ease;
+}
+
+.hero-kicker {
+  display: inline-block;
+  margin: 0 0 0.65rem;
+  padding: 0.3rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 0.82rem;
+  font-weight: 650;
 }
 
 .hero h1 {

@@ -2,13 +2,14 @@
 export function timeToMinutes(time) {
   if (!time) return 0
   const [h, m] = time.split(':').map(Number)
-  return h * 60 + m
+  return h * 60 + (m || 0)
 }
 
 /** Convert minutes to "HH:MM" */
 export function minutesToTime(mins) {
-  const h = Math.floor(mins / 60) % 24
-  const m = mins % 60
+  const clamped = Math.max(0, Math.min(mins, 23 * 60 + 59))
+  const h = Math.floor(clamped / 60) % 24
+  const m = clamped % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
@@ -25,23 +26,42 @@ export function getDayName(dateStr, lang = 'en') {
     en: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
     ar: ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'],
   }
-  const d = new Date(dateStr + 'T12:00:00')
-  return days[lang][d.getDay()]
+  const d = parseLocalDate(dateStr)
+  return days[lang]?.[d.getDay()] || days.en[d.getDay()]
 }
 
 export function getDayIndex(dateStr) {
-  return new Date(dateStr + 'T12:00:00').getDay()
+  return parseLocalDate(dateStr).getDay()
 }
 
+/** Local timezone date as YYYY-MM-DD (avoids UTC day shift) */
 export function todayISO() {
   const d = new Date()
-  return d.toISOString().slice(0, 10)
+  return toISODate(d)
+}
+
+export function toISODate(d) {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+export function parseLocalDate(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d, 12, 0, 0)
 }
 
 export function addDaysISO(dateStr, days) {
-  const d = new Date(dateStr + 'T12:00:00')
+  const d = parseLocalDate(dateStr)
   d.setDate(d.getDate() + days)
-  return d.toISOString().slice(0, 10)
+  return toISODate(d)
+}
+
+export function startOfWeekISO(dateStr = todayISO()) {
+  const d = parseLocalDate(dateStr)
+  d.setDate(d.getDate() - d.getDay())
+  return toISODate(d)
 }
 
 /** Check if two time ranges overlap on the same day */
@@ -54,9 +74,13 @@ export function overlaps(a, b) {
   return aStart < bEnd && bStart < aEnd
 }
 
+/** Overlap only against real (non-free) activities */
 export function hasOverlap(activities, candidate, excludeId = null) {
   return activities.some(
-    (a) => a.id !== excludeId && overlaps(a, candidate),
+    (a) =>
+      a.id !== excludeId &&
+      a.category !== 'free' &&
+      overlaps(a, candidate),
   )
 }
 
@@ -115,43 +139,43 @@ export function findFreePeriodsWeek(activities, startDate = todayISO()) {
   return all
 }
 
+function uid() {
+  return `act_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
 /**
  * Generate a sample weekly timetable from seed preferences,
  * then fill free gaps. Respects existing fixed activities.
  */
 export function generateSmartTimetable(existing = [], weekStart = todayISO()) {
-  const uid = () => `act_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-  const generated = [...existing]
-  const dayTemplates = [
-    // day offset templates when that day has no university/work yet
-    [
-      { category: 'university', name: { en: 'University Classes', ar: 'محاضرات جامعية' }, start: '08:00', end: '14:00', priority: 'high' },
-      { category: 'personal', name: { en: 'Lunch & Rest', ar: 'غداء وراحة' }, start: '14:00', end: '15:00', priority: 'medium' },
-      { category: 'work', name: { en: 'Work Hours', ar: 'ساعات العمل' }, start: '15:00', end: '17:00', priority: 'high' },
-      { category: 'studying', name: { en: 'Study Session', ar: 'جلسة دراسة' }, start: '18:00', end: '20:00', priority: 'high' },
-      { category: 'personal', name: { en: 'Personal Time', ar: 'وقت شخصي' }, start: '20:00', end: '21:00', priority: 'low' },
-      { category: 'sleep', name: { en: 'Sleep & Rest', ar: 'نوم وراحة' }, start: '23:00', end: '23:59', priority: 'medium' },
-    ],
+  const generated = [...existing.filter((a) => !a.generated)]
+  const weekdayTemplate = [
+    { category: 'university', name: { en: 'University Classes', ar: 'محاضرات جامعية' }, start: '08:00', end: '14:00', priority: 'high' },
+    { category: 'personal', name: { en: 'Lunch & Rest', ar: 'غداء وراحة' }, start: '14:00', end: '15:00', priority: 'medium' },
+    { category: 'work', name: { en: 'Work Hours', ar: 'ساعات العمل' }, start: '15:00', end: '17:00', priority: 'high' },
+    { category: 'studying', name: { en: 'Study Session', ar: 'جلسة دراسة' }, start: '18:00', end: '20:00', priority: 'high' },
+    { category: 'personal', name: { en: 'Personal Time', ar: 'وقت شخصي' }, start: '20:00', end: '21:00', priority: 'low' },
+  ]
+  const weekendTemplate = [
+    { category: 'studying', name: { en: 'Weekend Study', ar: 'دراسة نهاية الأسبوع' }, start: '10:00', end: '12:00', priority: 'medium' },
+    { category: 'personal', name: { en: 'Personal Activities', ar: 'أنشطة شخصية' }, start: '14:00', end: '16:00', priority: 'low' },
+    { category: 'studying', name: { en: 'Assignment Work', ar: 'عمل الواجبات' }, start: '17:00', end: '19:00', priority: 'high' },
   ]
 
   for (let i = 0; i < 7; i++) {
     const date = addDaysISO(weekStart, i)
     const dayOfWeek = getDayIndex(date)
-    // Skip Friday/Saturday lightly for Gulf/weekend flexibility — still add lighter load
     const hasFixed = generated.some(
-      (a) => a.date === date && (a.category === 'university' || a.category === 'work'),
+      (a) => a.date === date && (a.category === 'university' || a.category === 'work' || a.category === 'studying'),
     )
-    if (hasFixed) continue
+    if (hasFixed) {
+      // Still detect free gaps for days that already have user activities
+      addFreeSlots(generated, date)
+      continue
+    }
 
-    const template = dayTemplates[0]
     const isWeekend = dayOfWeek === 5 || dayOfWeek === 6
-    const items = isWeekend
-      ? [
-          { category: 'studying', name: { en: 'Weekend Study', ar: 'دراسة نهاية الأسبوع' }, start: '10:00', end: '12:00', priority: 'medium' },
-          { category: 'personal', name: { en: 'Personal Activities', ar: 'أنشطة شخصية' }, start: '14:00', end: '16:00', priority: 'low' },
-          { category: 'studying', name: { en: 'Assignment Work', ar: 'عمل الواجبات' }, start: '17:00', end: '19:00', priority: 'high' },
-        ]
-      : template
+    const items = isWeekend ? weekendTemplate : weekdayTemplate
 
     for (const item of items) {
       const candidate = {
@@ -171,36 +195,78 @@ export function generateSmartTimetable(existing = [], weekStart = todayISO()) {
       }
     }
 
-    // Mark free gaps explicitly as free-time activities (for visibility)
-    const gaps = findFreePeriods(generated, date)
-    for (const gap of gaps) {
-      if (gap.duration < 30) continue
-      const freeAct = {
-        id: uid(),
-        name: 'Free Time',
-        nameAr: 'وقت فراغ',
-        category: 'free',
-        date: gap.date,
-        start: gap.start,
-        end: gap.end,
-        priority: 'low',
-        completed: false,
-        generated: true,
-        isFreeSlot: true,
-      }
-      if (!hasOverlap(generated, freeAct)) {
-        generated.push(freeAct)
-      }
-    }
+    addFreeSlots(generated, date)
   }
 
   return generated
 }
 
+function addFreeSlots(generated, date) {
+  const gaps = findFreePeriods(generated, date)
+  for (const gap of gaps) {
+    if (gap.duration < 30) continue
+    const freeAct = {
+      id: uid(),
+      name: 'Free Time',
+      nameAr: 'وقت فراغ',
+      category: 'free',
+      date: gap.date,
+      start: gap.start,
+      end: gap.end,
+      priority: 'low',
+      completed: false,
+      generated: true,
+      isFreeSlot: true,
+    }
+    if (!hasOverlap(generated, freeAct)) {
+      // also avoid stacking duplicate free labels
+      const alreadyFree = generated.some(
+        (a) => a.category === 'free' && a.date === freeAct.date && a.start === freeAct.start,
+      )
+      if (!alreadyFree) generated.push(freeAct)
+    }
+  }
+}
+
+/** When placing a real activity, trim/remove overlapping free slots */
+export function placeActivity(activities, activity) {
+  const withoutOverlappingFree = activities.filter((a) => {
+    if (a.category !== 'free') return true
+    if (a.date !== activity.date) return true
+    return !overlaps(a, activity)
+  })
+  // Rebuild leftover free gaps after placing
+  const next = [...withoutOverlappingFree, activity]
+  const gaps = findFreePeriods(next, activity.date)
+  const withoutOldFree = next.filter(
+    (a) => !(a.category === 'free' && a.date === activity.date),
+  )
+  for (const gap of gaps) {
+    if (gap.duration < 20) continue
+    withoutOldFree.push({
+      id: uid(),
+      name: 'Free Time',
+      nameAr: 'وقت فراغ',
+      category: 'free',
+      date: gap.date,
+      start: gap.start,
+      end: gap.end,
+      priority: 'low',
+      completed: false,
+      generated: true,
+      isFreeSlot: true,
+    })
+  }
+  return withoutOldFree
+}
+
 export function durationHours(activities, categoryFilter = null) {
   return activities
     .filter((a) => !categoryFilter || a.category === categoryFilter)
-    .reduce((sum, a) => sum + (timeToMinutes(a.end) - timeToMinutes(a.start)) / 60, 0)
+    .reduce((sum, a) => {
+      const mins = timeToMinutes(a.end) - timeToMinutes(a.start)
+      return sum + Math.max(0, mins) / 60
+    }, 0)
 }
 
 export function pickRecommendationDuration(gapMinutes) {
